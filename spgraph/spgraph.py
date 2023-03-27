@@ -44,9 +44,16 @@ class SPGraph:
         raise SPException("Load .graphml module")
     
     def get_symmetry(self: SPGraph) -> "OrientedPlanarSymmetry":
-        raise SPException("Load .layout module")
+        raise SPException("Load .symmetry module")
     
-    def from_sexp(s: str) -> SPGraph:
+    def draw(self: SPGraph, pretty: bool = False) -> str:
+        raise SPException("Load .layout module")
+
+    @classmethod
+    def from_sexp(cls, s: str) -> SPGraph:
+        raise SPException("Load .sexp module")
+
+    def to_sexp(self: SPGraph) -> str:
         raise SPException("Load .sexp module")
 
 

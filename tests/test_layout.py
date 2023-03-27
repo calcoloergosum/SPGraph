@@ -102,18 +102,103 @@ TESTCASES = [
             "-----",
         ],
     ),
+    (
+        """
+        (p
+            (s
+                (p
+                    (s _ _ _ _)
+                    (s _ _ _)
+                    (s _ _ _)
+                )
+                _
+            )
+            (s
+                (p (s _ _ _) (s _ _ _) (s _ _ _ _) (s _ _))
+                _
+                (p (s _ _ _) (s _ _ _ _))
+            )
+        )""",
+        [
+            "-------------------",
+            "  | | |   | | | |  ",
+            "  | | |   | | - |  ",
+            "  | | |   - - | |  ",
+            "  | | |   | | - -  ",
+            "  | | |   - - | |  ",
+            "  - | |   | | - |  ",
+            "  | - -   | | | |  ",
+            "  - | |  --------- ",
+            "  | - -      |     ",
+            "  - | |    -----   ",
+            "  | | |     | |    ",
+            " -------    | -    ",
+            "    |       - |    ",
+            "    |       | -    ",
+            "    |       - |    ",
+            "    |       | -    ",
+            "    |       | |    ",
+            "-------------------",
+        ]
+    )
 ]
 @pytest.mark.parametrize("sexp, expect", TESTCASES)
-def test_layout(sexp, expect):
+def test_layout_simple(sexp, expect):
     spg = SPGraph.from_sexp(sexp)
-    answer = spg.draw()
+    answer = spg.draw().split("\n")
+    assert len(expect) == len(answer)
+    for exp, ans in zip(expect, answer):
+        assert exp == ans
+
+
+TESTCASES = [
+    (
+        "_",
+"""\
+┯
+│
+┷""".split("\n"),
+    ),
+    (
+        """(p
+            (６ (p (s _ _ _ _) (s _ _ _) (s _ _ _)) _)
+            (s _ (p (s _ _) (s _ _) (s _ _ _ _) (s _ _ _)))
+            (s (p (s _ _ _) (s _ _ _) (s _ _ _ _) (s _ _)) _ (p (s _ _ _) (s _ _ _ _)))
+        )""",
+"""\
+╺━┯━┯━┯━━━━━━┯━━━━━━┯━┯━┯━┯━╸
+  │ │ │      │      │ │ │ │  
+  │ │ │      │      │ │ ┿ │  
+  │ │ │      │      ┿ ┿ │ │  
+  │ │ │      │      │ │ ┿ ┿  
+  │ │ │      │      ┿ ┿ │ │  
+  ┿ │ │  ╺┯━┯┷┯━┯╸  │ │ ┿ │  
+  │ ┿ ┿   │ │ │ │   │ │ │ │  
+  ┿ │ │   │ │ ┿ │  ╺┷━┷┯┷━┷╸ 
+  │ ┿ ┿   │ │ │ ┿      │     
+  ┿ │ │   ┿ ┿ ┿ │    ╺┯┷┯╸   
+  │ │ │   │ │ │ ┿     │ │    
+ ╺┷━┿━┷╸  │ │ ┿ │     │ ┿    
+    │     │ │ │ │     ┿ │    
+    │     │ │ │ │     │ ┿    
+    │     │ │ │ │     ┿ │    
+    │     │ │ │ │     │ ┿    
+    │     │ │ │ │     │ │    
+╺━━━┷━━━━━┷━┷━┷━┷━━━━━┷━┷━━━╸""".split("\n")
+    )
+]
+@pytest.mark.parametrize("sexp, expect", TESTCASES)
+def test_layout_pretty(sexp, expect):
+    spg = SPGraph.from_sexp(sexp)
+    answer = spg.draw(pretty=True)
+    answer = answer.split("\n")
     assert len(expect) == len(answer)
     for exp, ans in zip(expect, answer):
         assert exp == ans
 
 
 def test_layout_random():
-    spg = make_random(3, 5)
-    answer = spg.draw()
-    for l in answer:
-        print(l)
+    spg = make_random(5, 4, 10)
+    answer = spg.draw(pretty=True)
+    print()
+    print(answer)

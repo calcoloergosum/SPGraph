@@ -3,66 +3,107 @@ from .spgraph import SPGraph, InternalNode, LeafNode, SeriesNode, ParallelNode
 from typing import List
 
 
-def set_xy(self: SPGraph) -> None:
-    if getattr(self, 'xy_src', None) is not None:
-        return
+# def set_xy(self: SPGraph) -> None:
+#     if getattr(self, 'xy_src', None) is not None:
+#         return
 
-    # Fit everything in [-height, height] x [-width, width]
-    if isinstance(self, LeafNode):
-        setattr(self, 'xy_src', [0, -1])
-        setattr(self, 'xy_dst', [0,  1])
-        setattr(self, 'width', 1)
-        setattr(self, 'height', 1)
-        return
-    assert isinstance(self, InternalNode)
+#     # Fit everything in [-height, height] x [-width, width]
+#     if isinstance(self, LeafNode):
+#         setattr(self, 'xy_src', [0, -1])
+#         setattr(self, 'xy_dst', [0,  1])
+#         setattr(self, 'width', 1)
+#         setattr(self, 'height', 1)
+#         return
+#     assert isinstance(self, InternalNode)
 
-    for c in self.inner:
-        set_xy(c)
+#     for c in self.inner:
+#         set_xy(c)
 
-    width = 0
-    height = 0
-    if isinstance(self, SeriesNode):
-        for c in self.inner:
-            translate(c, 0, height)
-            width = max(width, c.width)
-            height += c.height
+#     width = 0
+#     height = 0
+#     if isinstance(self, SeriesNode):
+#         for c in self.inner:
+#             translate(c, 0, height)
+#             width = max(width, c.width)
+#             height += c.height
 
-    if isinstance(self, ParallelNode):
-        for c in self.inner:
-            translate(c, 0, width)
-            width += c.width
-            height = max(height, c.height)
+#     if isinstance(self, ParallelNode):
+#         for c in self.inner:
+#             translate(c, 0, width)
+#             width += c.width
+#             height = max(height, c.height)
 
-    setattr(self, 'xy_src', [0, -height])
-    setattr(self, 'xy_dst', [0, height])
-    setattr(self, 'width', width)
-    setattr(self, 'height', height)
+#     setattr(self, 'xy_src', [0, -height])
+#     setattr(self, 'xy_dst', [0, height])
+#     setattr(self, 'width', width)
+#     setattr(self, 'height', height)
 
-    _ = self.get_symmetry()
-
-
-def translate(self: SPGraph, x: float, y: float) -> None:
-    self.xy_src[0] -= x
-    self.xy_src[1] -= y
-    self.xy_dst[0] -= x
-    self.xy_dst[1] -= y
-    if isinstance(self, LeafNode):
-        return
-    for c in self.inner:
-        translate(c, x, y)
+#     _ = self.get_symmetry()
 
 
-def draw(self: SPGraph, pretty: bool = False) -> List[str]:
-    set_xy(self)
+# def translate(self: SPGraph, x: float, y: float) -> None:
+#     self.xy_src[0] -= x
+#     self.xy_src[1] -= y
+#     self.xy_dst[0] -= x
+#     self.xy_dst[1] -= y
+#     if isinstance(self, LeafNode):
+#         return
+#     for c in self.inner:
+#         translate(c, x, y)
+
+
+def draw(self: SPGraph, pretty: bool = False) -> str:
+    # set_xy(self)
     ret = _draw(self, True, True)
     if not pretty:
-        return ret
+        return '\n'.join(ret)
 
-    return [r.replace("-", "━") for r in ret]
+    # pretty print
+    import numpy as np
+    arr = np.array([[c for c in l] for l in ret], dtype='<U1')
+    t_empty = np.vstack(([[True] * arr.shape[1]], arr[:-1, :] == ' '))
+    b_empty = np.vstack((arr[1:, :] == ' ', [[True] * arr.shape[1]]))
+    l_empty = np.hstack(([[True]] * arr.shape[0], arr[:, :-1] == ' '))
+    r_empty = np.hstack((arr[:, 1:] == ' ', [[True]] * arr.shape[0]))
+    sym_hor = (arr == '-')
+    sym_ver = (arr == '|')
+    arr[sym_ver] = '│'
+
+    # 4 empty
+    arr[sym_hor * l_empty * r_empty * t_empty * b_empty] = "+"
+
+    # 3 empty
+    arr[sym_hor * l_empty * r_empty * t_empty * ~b_empty] = '┯'
+    arr[sym_hor * l_empty * r_empty * ~t_empty * b_empty] = '┷'
+    arr[sym_hor * l_empty * ~r_empty * t_empty * b_empty] = '╺'
+    arr[sym_hor * ~l_empty * r_empty * t_empty * b_empty] = '╸'
+
+    # 2 empty
+    arr[sym_hor * l_empty * r_empty * ~t_empty * ~b_empty] = '┿'
+    arr[sym_hor * l_empty * ~r_empty * t_empty * ~b_empty] = '┍'
+    arr[sym_hor * ~l_empty * r_empty * t_empty * ~b_empty] = '┑'
+    arr[sym_hor * l_empty * ~r_empty * ~t_empty * b_empty] = '┕'
+    arr[sym_hor * ~l_empty * r_empty * ~t_empty * b_empty] = '┙'
+    arr[sym_hor * ~l_empty * ~r_empty * t_empty * b_empty] = '━'
+
+    # 1 empty
+    arr[sym_hor * l_empty * ~r_empty * ~t_empty * ~b_empty] = '┝'
+    arr[sym_hor * ~l_empty * r_empty * ~t_empty * ~b_empty] = '┥'
+    arr[sym_hor * ~l_empty * ~r_empty * t_empty * ~b_empty] = '┯'
+    arr[sym_hor * ~l_empty * ~r_empty * ~t_empty * b_empty] = '┷'
+
+    # 0 empty
+    arr[sym_hor * ~l_empty * ~r_empty * ~t_empty * ~b_empty] = '┿'
+
+    ret = '\n'.join([''.join(l) for l in arr.tolist()])
+    assert '-' not in ret
+    assert '|' not in ret
+
+    return ret
+
 
 def _draw(self: SPGraph, draw_s: bool, draw_t: bool) -> List[str]:
-    set_xy(self)
-
+    # set_xy(self)
     mat = []
     if isinstance(self, LeafNode):
         border = "-"
@@ -96,6 +137,13 @@ def _draw(self: SPGraph, draw_s: bool, draw_t: bool) -> List[str]:
 
 
 def extend_box_height(c, height: int) -> List[str]:
+    """Simple function that makes it long
+             |
+    |        |
+    -   =>   -
+    |        |
+             |
+    """
     w, h = len(c[0]), len(c)
     if h > height:
         raise ValueError(f"{h} > {height}")
@@ -103,8 +151,7 @@ def extend_box_height(c, height: int) -> List[str]:
     if diff == 0:
         return c
 
-    line = " " * ((w - 1) // 2) + "|" + " " * (w // 2)
-    c = (diff // 2) * [line] + c + ((diff + 1) // 2) * [line]
+    c = (diff // 2) * [c[0]] + c + ((diff + 1) // 2) * [c[-1]]
     return c
 
 

@@ -49,6 +49,6 @@ def test_automorphism_series_parallel():
     assert not sym.horizontal
 
 def test_automorphism_random_smoke():
-    g = make_random(10, 10)
+    g = make_random(10, 10, 10)
     g.get_symmetry()
     g.get_symmetry()
