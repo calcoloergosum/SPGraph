@@ -11,6 +11,8 @@ def to_graphml(self: SPGraph, g: Optional[pygraphml.Graph] = None) -> pygraphml.
         g = pygraphml.Graph()
 
     s, t = g.add_node('s'), g.add_node('t')
+    s['x'], s['y'] = getattr(self, 'xy_src', (0, 0))
+    t['x'], t['y'] = getattr(self, 'xy_dst', (0, 0))
     _add_edge(self, g, s, t)
     return g
 
@@ -23,8 +25,10 @@ def _add_edge(self: SPGraph, g: pygraphml.Graph, s: pygraphml.Node, t: pygraphml
     if isinstance(self, SeriesNode):
         # prepare intermediate nodes
         nodes = [s]
-        for _ in self.inner[:-1]:
-            nodes += [g.add_node(len(g.nodes()))]
+        for c in self.inner[:-1]:
+            n = g.add_node(len(g.nodes()))
+            n['x'], n['y'] = getattr(c, 'xy_src', (0, 0))
+            nodes += [n]
         nodes += [t]
 
         # add edges

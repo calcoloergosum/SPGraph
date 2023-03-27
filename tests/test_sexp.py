@@ -1,7 +1,15 @@
 from spgraph import SPGraph
 
-import pprint
+import pytest
 
-def test_load():
-    sexp = "(s (p _ _) _)"
-    pprint.pprint(SPGraph.from_sexp(sexp).asdict())
+TESTCASES = [
+    "_",
+    "(s _ _)",
+    "(s (p _ _) _)",
+    "(p (s _ _) (s _ _))",
+]
+
+
+@pytest.mark.parametrize("sexp", TESTCASES)
+def test_load(sexp):
+    assert sexp == SPGraph.from_sexp(sexp).to_sexp()

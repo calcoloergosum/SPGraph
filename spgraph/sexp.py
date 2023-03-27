@@ -1,6 +1,6 @@
 """S-expression representation of SPGraph"""
 import sexpdata
-from .spgraph import SPGraph, SPException
+from .spgraph import SPGraph, SPException, LeafNode, SeriesNode, ParallelNode
 
 
 def from_sexp(s: str) -> SPGraph:
@@ -18,4 +18,15 @@ def _from_sexp(sexp: sexpdata.Sequence) -> SPGraph:
     raise SPException(f"Unknown operation {sexp[0]}")
 
 
+def to_sexp(self: SPGraph) -> str:
+    if isinstance(self, LeafNode):
+        return "_"
+    if isinstance(self, SeriesNode):
+        return f"(s {' '.join(list(map(to_sexp, self.inner)))})"
+    if isinstance(self, ParallelNode):
+        return f"(p {' '.join(list(map(to_sexp, self.inner)))})"
+    raise NotImplementedError
+
+
 SPGraph.from_sexp = from_sexp
+SPGraph.to_sexp = to_sexp

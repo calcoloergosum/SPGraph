@@ -1,4 +1,4 @@
 from .spgraph import *
-import spgraph.layout
+import spgraph.symmetry
 import spgraph.graphml
 import spgraph.sexp
