@@ -144,7 +144,7 @@ TESTCASES = [
 ]
 @pytest.mark.parametrize("sexp, expect", TESTCASES)
 def test_layout_simple(sexp, expect):
-    spg = SPGraph.from_sexp(sexp)
+    spg = SPGraph.from_sexpr(sexp)
     answer = spg.draw().split("\n")
     assert len(expect) == len(answer)
     for exp, ans in zip(expect, answer):
@@ -161,7 +161,7 @@ TESTCASES = [
     ),
     (
         """(p
-            (６ (p (s _ _ _ _) (s _ _ _) (s _ _ _)) _)
+            (s (p (s _ _ _ _) (s _ _ _) (s _ _ _)) _)
             (s _ (p (s _ _) (s _ _) (s _ _ _ _) (s _ _ _)))
             (s (p (s _ _ _) (s _ _ _) (s _ _ _ _) (s _ _)) _ (p (s _ _ _) (s _ _ _ _)))
         )""",
@@ -189,7 +189,7 @@ TESTCASES = [
 ]
 @pytest.mark.parametrize("sexp, expect", TESTCASES)
 def test_layout_pretty(sexp, expect):
-    spg = SPGraph.from_sexp(sexp)
+    spg = SPGraph.from_sexpr(sexp)
     answer = spg.draw(pretty=True)
     answer = answer.split("\n")
     assert len(expect) == len(answer)

@@ -13,7 +13,7 @@ def test_automorphism_simplest():
     assert sym.horizontal
 
 def test_automorphism_simple_series():
-    g = SPGraph.from_sexp('(s _ _)')
+    g = SPGraph.from_sexpr('(s _ _)')
     sym = g.get_symmetry()
     assert sym.vertical
     assert sym.horizontal
@@ -22,7 +22,7 @@ def test_automorphism_simple_series():
     assert sym.horizontal
 
 def test_automorphism_simple_parallel():
-    g = SPGraph.from_sexp('(p _ _)')
+    g = SPGraph.from_sexpr('(p _ _)')
     sym = g.get_symmetry()
     assert sym.vertical
     assert sym.horizontal
@@ -31,7 +31,7 @@ def test_automorphism_simple_parallel():
     assert sym.horizontal
 
 def test_automorphism_parallel_series():
-    g = SPGraph.from_sexp('(p _ (s _ _))')
+    g = SPGraph.from_sexpr('(p _ (s _ _))')
     sym = g.get_symmetry()
     assert not sym.vertical
     assert sym.horizontal
@@ -40,7 +40,7 @@ def test_automorphism_parallel_series():
     assert sym.horizontal
 
 def test_automorphism_series_parallel():
-    g = SPGraph.from_sexp('(s _ (p _ _))')
+    g = SPGraph.from_sexpr('(s _ (p _ _))')
     sym = g.get_symmetry()
     assert sym.vertical
     assert not sym.horizontal

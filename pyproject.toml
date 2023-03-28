@@ -1,0 +1,2 @@
+[build-system]
+requires = ["typing_extensions >= 4.1", "setuptools>=40.8.0"]

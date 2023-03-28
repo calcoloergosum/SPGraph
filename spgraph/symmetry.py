@@ -2,11 +2,11 @@
 [1] S.-H. Hong, P. Eades, and S.-H. Lee, “Drawing series parallel digraphs symmetrically 6,” Computational Geometry, 2000.
 TODO: rotational symmetry
 """
-from .spgraph import SPGraph, SeriesNode, ParallelNode, LeafNode, InternalNode
-from typing import Tuple, Optional, List
 from dataclasses import dataclass
+from typing import Any, Tuple
+
 from .misc import array2indexmap
-from .symmetry import *
+from .spgraph import InternalNode, LeafNode, ParallelNode, SeriesNode, SPGraph
 
 Label = Tuple[int, ...]
 Code = int
@@ -22,7 +22,7 @@ def vertical_check(self: SPGraph) -> bool:
 
     assert isinstance(self, ParallelNode)
     # classify isomorphisms
-    assign_code_vertical(self)
+    _assign_code_vertical(self)
     code2idxs = array2indexmap(c.code_vertical for c in self.inner)
     # classify isomorphisms done
 
@@ -50,7 +50,7 @@ def vertical_check(self: SPGraph) -> bool:
     return asyms == []
 
 
-def assign_label_vertical(u) -> Label:
+def _assign_label_vertical(u) -> Label:
     if (label := getattr(u, 'label_vertical', None)) is not None:
         return label
 
@@ -59,7 +59,7 @@ def assign_label_vertical(u) -> Label:
         setattr(u, 'label_vertical', label)
     else:
         assert isinstance(u, InternalNode)
-        assign_code_vertical(u)
+        _assign_code_vertical(u)
 
         codes = [c.code_vertical for c in u.inner]
         label = codes
@@ -70,19 +70,20 @@ def assign_label_vertical(u) -> Label:
     return label
 
 
-def assign_code_vertical(u: SPGraph) -> None:
+def _assign_code_vertical(u: SPGraph[Any, Any]) -> None:
     # Leaf
     if isinstance(u, LeafNode):
         setattr(u, 'code_vertical', 1)
         return
 
+    assert isinstance(u, InternalNode)
     # Already done
     if (code := getattr(u.inner[0], 'code_vertical', None)) is not None:
         return
 
     labels = []
     for i, c in enumerate(u.inner):
-        _label = assign_label_vertical(c)
+        _label = _assign_label_vertical(c)
         labels += [_label]
 
     label2idxs = array2indexmap(labels)
@@ -94,7 +95,8 @@ def assign_code_vertical(u: SPGraph) -> None:
             setattr(u.inner[i], 'code_vertical', code)
 
 
-def horizontal_check(self: SPGraph) -> bool:
+def horizontal_check(self: SPGraph[Any, Any]) -> bool:
+    """Ever so slightly modified from the paper to retain the symmetry found."""
     if isinstance(self, LeafNode):
         return True
 
@@ -111,14 +113,14 @@ def horizontal_check(self: SPGraph) -> bool:
         return True
 
     # retain symmetry info
-    tup = assign_label_horizontal(self, reversed=False)
+    tup = _assign_label_horizontal(self, reversed=False)
 
     syms, asyms = [], []
-    for i, (f, b) in enumerate(zip(tup[:len(tup)//2], tup[:-(len(tup)+1)//2:-1])):
+    for i, (l, r) in enumerate(zip(tup[:len(tup)//2], tup[:-(len(tup)+1)//2:-1])):
         idxs = (i, len(tup) - 1 - i)
-        if f == b:
+        if l == r:
             syms.append(idxs)
-        if f != b:
+        if l != r:
             asyms.append(idxs)
 
     if len(asyms) % 2 == 1:
@@ -130,7 +132,7 @@ def horizontal_check(self: SPGraph) -> bool:
     return asyms == []
 
 
-def assign_label_horizontal(u: SPGraph, reversed: bool) -> Label:
+def _assign_label_horizontal(u: SPGraph, reversed: bool) -> Label:
     if (label := getattr(u, 'label_horizontal', None)) is not None:
         return label
 
@@ -139,7 +141,7 @@ def assign_label_horizontal(u: SPGraph, reversed: bool) -> Label:
         setattr(u, 'label_horizontal', label)
     else:
         assert isinstance(u, InternalNode)
-        assign_code_horizontal(u)
+        _assign_code_horizontal(u)
         codes = [c.code_horizontal for c in u.inner]
         label = tuple(codes[::-1] if reversed else codes)
         if isinstance(u, ParallelNode):
@@ -149,19 +151,20 @@ def assign_label_horizontal(u: SPGraph, reversed: bool) -> Label:
     return label
 
 
-def assign_code_horizontal(u: SPGraph) -> None:
+def _assign_code_horizontal(u: SPGraph[Any, Any]) -> None:
     # Leaf
     if isinstance(u, LeafNode):
         setattr(u, 'code_horizontal', 1)
         return
 
+    assert isinstance(u, InternalNode)
     # Already done
     if (code := getattr(u.inner[0], 'code_horizontal', None)) is not None:
         return
 
     labels = []
     for i, c in enumerate(u.inner):
-        _label = assign_label_horizontal(c, reversed=i < len(u.inner) // 2)
+        _label = _assign_label_horizontal(c, reversed=i < len(u.inner) // 2)
         labels += [_label]
 
     label2idxs = array2indexmap(labels)
@@ -175,12 +178,16 @@ def assign_code_horizontal(u: SPGraph) -> None:
 
 @dataclass
 class OrientedPlanarSymmetry:
+    """Planar automorphism group"""
     vertical: bool
     horizontal: bool
     # rotational: bool
 
 
-def get_symmetry(self: SPGraph) -> OrientedPlanarSymmetry:
+def get_symmetry(self: SPGraph[Any, Any]) -> OrientedPlanarSymmetry:
+    """Get all planar symmetries that given series parallel graph has,
+    assuming that the order of edges are irrelevant.
+    """
     return OrientedPlanarSymmetry(
         vertical_check(self),
         horizontal_check(self),

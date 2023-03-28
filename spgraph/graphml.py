@@ -1,12 +1,15 @@
 """Dump to GraphML
 It is useful as you can load it from viewer e.g. yEd Graph Editor
 """
+from typing import Optional, Any
+
 import pygraphml
-from .spgraph import SPGraph, SeriesNode, ParallelNode, LeafNode
-from typing import Optional
+
+from .spgraph import LeafNode, ParallelNode, SeriesNode, SPGraph
 
 
-def to_graphml(self: SPGraph, g: Optional[pygraphml.Graph] = None) -> pygraphml.Graph:
+def to_graphml(self: SPGraph[Any, Any], g: Optional[pygraphml.Graph] = None) -> pygraphml.Graph:
+    """Convert into pygraphml format"""
     if g is None:
         g = pygraphml.Graph()
 
@@ -17,7 +20,7 @@ def to_graphml(self: SPGraph, g: Optional[pygraphml.Graph] = None) -> pygraphml.
     return g
 
 
-def _add_edge(self: SPGraph, g: pygraphml.Graph, s: pygraphml.Node, t: pygraphml.Node) -> None:
+def _add_edge(self: SPGraph[Any, Any], g: pygraphml.Graph, s: pygraphml.Node, t: pygraphml.Node) -> None:
     if isinstance(self, LeafNode):
         g.add_edge(s, t, True)
         return
@@ -32,10 +35,10 @@ def _add_edge(self: SPGraph, g: pygraphml.Graph, s: pygraphml.Node, t: pygraphml
         nodes += [t]
 
         # add edges
-        for c, s, t in zip(self.inner, nodes, nodes[1:]):
-            _add_edge(c, g, s, t)
+        for c, _s, _t in zip(self.inner, nodes, nodes[1:]):
+            _add_edge(c, g, _s, _t)
         return
-    
+
     if isinstance(self, ParallelNode):
         for c in self.inner:
             _add_edge(c, g, s, t)

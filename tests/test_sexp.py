@@ -12,4 +12,4 @@ TESTCASES = [
 
 @pytest.mark.parametrize("sexp", TESTCASES)
 def test_load(sexp):
-    assert sexp == SPGraph.from_sexp(sexp).to_sexp()
+    assert sexp == SPGraph.from_sexpr(sexp).to_sexpr()
