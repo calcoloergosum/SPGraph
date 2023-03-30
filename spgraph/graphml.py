@@ -5,7 +5,7 @@ from typing import Optional, Any
 
 import pygraphml
 
-from .spgraph import LeafNode, ParallelNode, SeriesNode, SPGraph
+from .spgraph import LeafNode, ForallNode, SeriesNode, SPGraph
 
 
 def to_graphml(self: SPGraph[Any, Any], g: Optional[pygraphml.Graph] = None) -> pygraphml.Graph:
@@ -39,7 +39,7 @@ def _add_edge(self: SPGraph[Any, Any], g: pygraphml.Graph, s: pygraphml.Node, t:
             _add_edge(c, g, _s, _t)
         return
 
-    if isinstance(self, ParallelNode):
+    if isinstance(self, ForallNode):
         for c in self.inner:
             _add_edge(c, g, s, t)
         return

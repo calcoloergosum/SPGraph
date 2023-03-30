@@ -47,4 +47,4 @@ def _make_random_parallel_or_leaf(
     for _ in range(n_children):
         depth = int(max_depth * random())
         children += [_make_random_series_or_leaf(depth - 1, max_children_series, max_children_parallel, p_leaf)]
-    return SPGraph.parallel(*children)
+    return SPGraph.forall(*children)

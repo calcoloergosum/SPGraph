@@ -40,8 +40,9 @@ class NodeType(IntEnum):
     If possible, use the class directly rather than using this.
     """
     SERIES = 0
-    PARALLEL = 1
-    LEAF = 2
+    PARALLEL_FORALL = 1
+    PARALLEL_EXISTS = 2
+    LEAF = 3
 
 
 class SPGraph(Generic[X, Y]):
@@ -60,9 +61,14 @@ class SPGraph(Generic[X, Y]):
 
     # compositions
     @classmethod
-    def parallel(cls, *args: List[SeriesNode[X, Y] | LeafNode[X, Y]]) -> ParallelNode[X, Y]:
+    def forall(cls, *args: List[SeriesNode[X, Y] | LeafNode[X, Y]]) -> ForallNode[X, Y]:
         """Ordered parallel composition of Series-Parallel Graph"""
-        return ParallelNode(tuple(args))
+        return ForallNode(tuple(args))
+
+    @classmethod
+    def exists(cls, *args: List[SeriesNode[X, Y] | LeafNode[X, Y]]) -> ExistsNode[X, Y]:
+        """Ordered parallel composition of Series-Parallel Graph"""
+        return ExistsNode(tuple(args))
 
     @classmethod
     def series(cls, *args) -> SeriesNode[X, Y]:
@@ -84,7 +90,13 @@ class SPGraph(Generic[X, Y]):
         """Ordered parallel composition of Series-Parallel Graph. Self becomes left."""
         if not isinstance(sibling, SPGraph):
             sibling = LeafNode.from_python(sibling, **kwargs)
-        return self.merge(ParallelNode, self, sibling)
+        return self.merge(ForallNode, self, sibling)
+
+    def or_(self, sibling: SPGraph[X, Z] | Callable[[X], Z], **kwargs) -> SPGraph[X, Tuple[Y, Z]]:
+        """Ordered parallel composition of Series-Parallel Graph. Self becomes left."""
+        if not isinstance(sibling, SPGraph):
+            sibling = LeafNode.from_python(sibling, **kwargs)
+        return self.merge(ExistsNode, self, sibling)
 
     def then(self, sibling: SPGraph[Y, Z] | Callable[[Y], Z], **kwargs) -> SPGraph[X, Z]:
         """Sequential (series) composition of Series-Parallel Graph. Self becomes parent."""
@@ -127,7 +139,7 @@ class SPGraph(Generic[X, Y]):
 
     def to_sexpr(self) -> str:
         """Placeholder for patch"""
-        raise SPException("Load .sexp module")
+        raise SPException("Load .sexpr module")
 
     def build_stream(self) -> "ThreadedSPGraph[X, Y]":
         """Placeholder for patch"""
@@ -136,7 +148,7 @@ class SPGraph(Generic[X, Y]):
 
 class InternalNode(SPGraph[X, Y]):
     """Compositions"""
-    def __init__(self, inner: Tuple[SeriesNode[X, Y] | LeafNode[X, Y] | ParallelNode[Any, Any], ...], **kwargs) -> None:
+    def __init__(self, inner: Tuple[SeriesNode[X, Y] | LeafNode[X, Y] | ForallNode[Any, Any], ...], **kwargs) -> None:
         super().__init__(**kwargs)
         if len(inner) < 2:
             raise RepresentationError("Not canonical")
@@ -169,14 +181,34 @@ class SeriesNode(InternalNode[X, Y]):
 
 class ParallelNode(InternalNode[X, Y]):
     """Parallel composition"""
-    def type(self) -> NodeType:
-        return NodeType.PARALLEL
 
     def asdict(self) -> Dict[str, str]:
         return {"type": self.type().name, "children": [c.asdict() for c in self.inner]}
 
+
+class ForallNode(ParallelNode[X, Y]):
+    """Broadcasting behavior. Default is index getter"""
+    def type(self) -> NodeType:
+        return NodeType.PARALLEL_FORALL
+
     def __call__(self, x: X) -> Y:
-        return cast(Y, tuple(f(x) for f in self.inner))
+        assert len(x) == len(self.inner), (x, self.inner)
+        return cast(Y, tuple(f(_x) for _x, f in zip(x, self.inner)))
+    
+
+class ExistsNode(ParallelNode[X, Y]):
+    """Load balancing behavior. Default is round-robin"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._index = 0
+
+    def type(self) -> NodeType:
+        return NodeType.PARALLEL_EXISTS
+
+    def __call__(self, x: X) -> Y:
+        ret = self.inner[self._index % len(self.inner)](x)
+        self._index += 1
+        return cast(Y, ret)
 
 
 class LeafNode(SPGraph[X, Y]):
@@ -210,6 +242,7 @@ class LeafNode(SPGraph[X, Y]):
             return functools.partial(cls.from_python, batchsize=batchsize)
         assert callable(inner)
         return LeafNode(inner, batchsize=batchsize)
+
 
 SPGraph.__doc__ == __doc__  # pylint: disable=pointless-statement
 function = LeafNode.from_python

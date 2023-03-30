@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Tuple
 
 from .misc import array2indexmap
-from .spgraph import InternalNode, LeafNode, ParallelNode, SeriesNode, SPGraph
+from .spgraph import InternalNode, LeafNode, ForallNode, SeriesNode, SPGraph, ParallelNode
 
 Label = Tuple[int, ...]
 Code = int
@@ -63,7 +63,7 @@ def _assign_label_vertical(u) -> Label:
 
         codes = [c.code_vertical for c in u.inner]
         label = codes
-        if isinstance(u, ParallelNode):
+        if isinstance(u, ForallNode):
             label = sorted(label)
         label = tuple(label)
         setattr(u, 'label_vertical', label)
@@ -144,7 +144,7 @@ def _assign_label_horizontal(u: SPGraph, reversed: bool) -> Label:
         _assign_code_horizontal(u)
         codes = [c.code_horizontal for c in u.inner]
         label = tuple(codes[::-1] if reversed else codes)
-        if isinstance(u, ParallelNode):
+        if isinstance(u, ForallNode):
             label = sorted(label)
         label = tuple(label)
         setattr(u, 'label_horizontal', label)

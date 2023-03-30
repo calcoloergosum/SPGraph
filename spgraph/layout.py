@@ -1,9 +1,9 @@
 """In charge of calculating position of each node"""
 # NOTE: using symmetry is not implemented yet
 # from .symmetry import get_symmetry
-from typing import List, Any
+from typing import Any, List
 
-from .spgraph import LeafNode, ParallelNode, SeriesNode, SPGraph
+from .spgraph import ExistsNode, ForallNode, LeafNode, SeriesNode, SPGraph
 
 # def set_xy(self: SPGraph) -> None:
 #     if getattr(self, 'xy_src', None) is not None:
@@ -64,6 +64,7 @@ def draw(self: SPGraph[Any, Any], pretty: bool = False) -> str:
     """
     # pylint: disable=invalid-unary-operand-type,import-outside-toplevel
     import numpy as np
+
     # set_xy(self)
     val = _draw(self, True, True)
     if not pretty:
@@ -131,7 +132,7 @@ def _draw(self: SPGraph[Any, Any], draw_s: bool, draw_t: bool) -> List[str]:
             mat = mat[:-1] + [l] + c[1:]
         mat = mat[1:-1]  # ignore first and last sink
     else:
-        assert isinstance(self, ParallelNode)
+        assert isinstance(self, (ForallNode, ExistsNode))
         children = [_draw(c, False, False) for c in self.inner]
         max_height = max(len(c) for c in children)
         children = [_extend_box_height(c, max_height) for c in children]
