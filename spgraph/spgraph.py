@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import functools
 from enum import IntEnum
-from typing import (TYPE_CHECKING, Any, Callable, Dict, Generic, Optional, List,
-                    Tuple, TypeVar, Union, cast)
+from typing import (TYPE_CHECKING, Any, Callable, Dict, Generic, List,
+                    Optional, Tuple, Type, TypeVar, Union, cast)
 
 from typing_extensions import Self
 
@@ -69,23 +69,28 @@ class SPGraph(Generic[X, Y]):
         """Sequential (series) composition of Series-Parallel Graph"""
         return SeriesNode(tuple(args))
 
+    @classmethod
+    def merge(cls, klass: Type[InternalNode], *args, **kwargs) -> SPGraph[Any, Any]:
+        """Merge. Preserves canonoical representation"""
+        _args = []
+        for arg in args:
+            if isinstance(arg, klass):
+                _args += arg.inner
+            else:
+                _args += [arg]
+        return klass(tuple(_args), **kwargs)
+
     def and_(self, sibling: SPGraph[X, Z] | Callable[[X], Z], **kwargs) -> SPGraph[X, Tuple[Y, Z]]:
         """Ordered parallel composition of Series-Parallel Graph. Self becomes left."""
         if not isinstance(sibling, SPGraph):
             sibling = LeafNode.from_python(sibling, **kwargs)
-        args: List[SeriesNode[X, Z] | LeafNode[X, Z]] = []
-        args += self.inner if isinstance(self, ParallelNode) else [self]
-        args += sibling.inner if isinstance(sibling, ParallelNode) else [sibling]
-        return self.__class__.parallel(*args)
+        return self.merge(ParallelNode, self, sibling)
 
     def then(self, sibling: SPGraph[Y, Z] | Callable[[Y], Z], **kwargs) -> SPGraph[X, Z]:
         """Sequential (series) composition of Series-Parallel Graph. Self becomes parent."""
         if not isinstance(sibling, SPGraph):
             sibling = LeafNode.from_python(sibling, **kwargs)
-        args = []
-        args += self.inner if isinstance(self, SeriesNode) else [self]
-        args += sibling.inner if isinstance(sibling, SeriesNode) else [sibling]
-        return self.__class__.series(*args)
+        return self.merge(SeriesNode, self, sibling)
 
     before = then
 
@@ -93,9 +98,7 @@ class SPGraph(Generic[X, Y]):
         """f.after(g)(x) <=> f(g)(x) <=> (f.g)(x)"""
         if not isinstance(sibling, SPGraph):
             sibling = LeafNode.from_python(sibling, **kwargs)
-        if isinstance(sibling, SeriesNode):
-            return self.__class__.series(*sibling.inner, self)
-        return self.__class__.series(sibling, self)
+        return sibling.then(self)
 
     @classmethod
     def make_node(cls, obj: Any) -> LeafNode:
