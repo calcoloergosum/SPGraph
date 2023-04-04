@@ -21,11 +21,73 @@ def test_build_series():
         processor.stop()
 
 
+def test_build_series_long():
+    processor = add_one.then(add_one).then(add_one).then(add_one).build_stream()
+    processor.start()
+    try:
+        assert list(processor([1, 2, 3, 4, 5])) == [5, 6, 7, 8, 9]
+    finally:
+        processor.stop()
+
+
 def test_build_forall():
     processor = add_one.and_(mul_two).build_stream()
     processor.start()
     assert list(processor([(1, 1), (2, 2), (3, 3)])) == [(2, 2), (3, 4), (4, 6)]
     processor.stop()
+
+
+class SomeError(Exception):
+    pass
+
+@spgraph.function
+def raise_(_):
+    raise SomeError
+
+
+def test_build_raise():
+    processor = raise_.build_stream()
+    processor.start()
+
+    # simplest case
+    with pytest.raises(SomeError):
+        assert list(processor([1, 2, 3, 4, 5])) == [5, 6, 7, 8, 9]
+    processor.stop(stopped_ok=True, no_raise=True)
+
+
+def test_build_raise_series():
+    # series
+    processor = raise_.then(mul_two).build_stream()
+    processor.start()
+
+    with pytest.raises(SomeError):
+        processor.put(1)
+        _ = processor.get(min_timeout=0.1, retry_on_timeout=True)
+    processor.stop(stopped_ok=True, no_raise=True)
+
+
+def test_build_raise_forall():
+    processor = raise_.and_(mul_two).build_stream()
+    processor.start()
+
+    with pytest.raises(SomeError):
+        processor.put((1, 2))
+        try:
+            _ = processor.get(min_timeout=0.1, retry_on_timeout=True)
+        finally:
+            processor.stop(stopped_ok=True, no_raise=True)
+
+
+def test_build_raise_exists():
+    processor = raise_.or_(mul_two).build_stream()
+    processor.start()
+
+    with pytest.raises(SomeError):
+        processor.put(1)
+        try:
+            _ = processor.get(min_timeout=0.1, retry_on_timeout=True)
+        finally:
+            processor.stop(stopped_ok=True, no_raise=True)
 
 
 def test_build_exists():

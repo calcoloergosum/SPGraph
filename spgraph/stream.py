@@ -9,13 +9,13 @@ import itertools
 import queue
 import threading
 from typing import (Any, Callable, Generic, Iterable, Iterator, List,
-                    Tuple, Type, cast)
+                    Tuple, Type, cast, Sized)
 
 from typing_extensions import Self
 
 from .spgraph import (LeafNode, ForallNode, SeriesNode, ShouldNotBeReachable, ExistsNode,
                       SPException, SPGraph, W, X, Y, Z)
-
+import sys
 
 def _async_raise(tid: int, exctype: Type[Exception]) -> None:
     '''Raises an exception in the threads with id tid'''
@@ -85,6 +85,18 @@ class ThreadWithExc(threading.Thread):
         """
         _async_raise( self._get_my_tid(), exctype )
 
+    def run(self):
+        setattr(self, 'exception', None)
+        try:
+            super().run()
+        except Exception as exc:
+            self.exception = sys.exc_info()
+        # no dying message
+    
+    def raise_if_exception(self):
+        if self.exception:
+            raise self.exception[0](self.exception[2])
+
 
 class StreamingError(SPException):
     """General exception class"""
@@ -92,6 +104,10 @@ class StreamingError(SPException):
 
 class StateError(StreamingError):
     """Unhandled state error; e.g. starting a thread twice"""
+
+
+class MultipleErrors(StateError):
+    pass
 
 
 QueueUnit = queue.Queue
@@ -119,7 +135,7 @@ class ThreadedSPGraph:
     def put(self, x: X) -> None:
         raise NotImplementedError
     
-    def get(self, timeout: float) -> Y:
+    def get(self, min_timeout: float, retry_on_timeout: bool) -> Y:
         raise NotImplementedError
 
     def report(self) -> None:
@@ -176,13 +192,33 @@ class ThreadedInternalNode(ThreadedSPGraph):
             obj.start()
         self.is_running = True
 
-    def stop(self) -> None:
+    def stop(self, stopped_ok: bool = False, no_raise: bool = False) -> None:
         """Stop all the child threads. Raises `StateError` if not running"""
         if not self.is_running:
             raise StateError("It is not running")
+
+        excs = []
         for obj in self.inner:
-            obj.raise_exc(Stop)
+            if obj.is_alive():
+                obj.raise_exc(Stop)
+                continue
+
+            try:
+                self.raise_if_exception()
+            except Exception as exc:
+                excs += [exc]
+            if not stopped_ok:
+                raise StateError("Partially stopped already")
+        if not no_raise:
+            if len(excs) == 1:
+                raise excs[0]
+            if len(excs) > 1:
+                raise MultipleErrors(excs)
         self.is_running = False
+
+    def raise_if_exception(self):
+        for obj in self.inner:
+            obj.raise_if_exception()
 
     def __call__(self, values: Iterable[X]) -> Iterator[Y]:
         if not self.is_running:
@@ -195,16 +231,12 @@ class ThreadedInternalNode(ThreadedSPGraph):
             n += 1
 
         for _ in range(n - 1):
-            while True:
-                try:
-                    yield self.get(timeout=1)
-                    break
-                except queue.Empty:
-                    continue
+            yield self.get(min_timeout=1, retry_on_timeout=True)
 
         # discard eob token
-        _token = self.get(timeout=1)
-        assert token == _token, (token, _token)
+        _token = self.get(min_timeout=1, retry_on_timeout=True)
+        if token != _token:
+            raise StateError(f"Token is not received properly: {token} != {_token}")
 
     def report(self) -> None:
         for c in self.inner:
@@ -215,8 +247,15 @@ class ThreadedSeriesNode(ThreadedInternalNode):
     def put(self, x: X) -> None:
         self.inner[0].put(x)
 
-    def get(self, timeout: float) -> Y:
-        return self.inner[-1].get(timeout=timeout)
+    def get(self, min_timeout: float, retry_on_timeout: bool) -> Y:
+        """Series specific exception propagation"""
+        try:
+            return self.inner[-1].get(min_timeout=min_timeout, retry_on_timeout=False)
+        except queue.Empty as exc:
+            if not retry_on_timeout:
+                raise exc
+            for i in self.inner:
+                i.raise_if_exception()
 
 
 class ThreadedForallNode(ThreadedInternalNode):
@@ -226,12 +265,25 @@ class ThreadedForallNode(ThreadedInternalNode):
                 c.put(x)
             return
 
+        if not isinstance(x, Sized):
+            raise TypeError(f"{x} has no __len__")
         assert len(x) == len(self.inner)
         for _x, c in zip(x, self.inner):
             c.put(_x)
 
-    def get(self, timeout: float) -> Y:
-        ys = tuple(c.get(timeout=timeout) for c in self.inner)
+    def get(self, min_timeout: float, retry_on_timeout: bool) -> Y:
+        """Forall specific exception propagation"""
+        ys = []
+        for c in self.inner:
+            while True:
+                try:
+                    ys.append(c.get(min_timeout=min_timeout, retry_on_timeout=False))
+                    break
+                except queue.Empty as exc:
+                    if not retry_on_timeout:
+                        raise exc
+                    c.raise_if_exception()
+        ys = tuple(ys)
 
         # eob token check
         is_token = False
@@ -262,15 +314,23 @@ class ThreadedExistsNode(ThreadedInternalNode):
         self.inner[self._put_counter % len(self.inner)].put(x)
         self._put_counter += 1
 
-    def get(self, timeout: float) -> Y:
+    def get(self, min_timeout: float, retry_on_timeout: bool = True) -> Y:
+        """Exists specific exception propagation"""
         i = self._get_counter % len(self.inner)
-        ret = self.inner[i].get(timeout=timeout)
+        while True:
+            try:
+                ret = self.inner[i].get(min_timeout=min_timeout, retry_on_timeout=False)
+                break
+            except queue.Empty as exc:
+                if not retry_on_timeout:
+                    raise exc
+                self.raise_if_exception()
 
         if isinstance(ret, FlushToken):
             for _i, c in enumerate(self.inner):
                 if i == _i:
                     continue
-                assert isinstance(c.get(timeout=timeout), FlushToken)
+                assert isinstance(c.get(min_timeout=min_timeout), FlushToken)
             return ret
 
         self._get_counter += 1
@@ -307,11 +367,41 @@ class ThreadedLeafNode(ThreadWithExc, ThreadedSPGraph, Generic[X, Y]):
     def put(self, x: X) -> None:
         self.in_queue.put(x)
 
-    def get(self, timeout: float) -> Y:
-        return self.out_queue.get(timeout)
+    def get(self, min_timeout: float, retry_on_timeout: bool = False) -> Y:
+        """Every timeout on queue's pop invokes thread exception check.
+        If no exception, try again or raise `queue.Empty`.
+        """
+        while True:
+            try:
+                return self.out_queue.get(timeout=min_timeout)
+            except queue.Empty as exc:
+                if not retry_on_timeout:
+                    raise exc
+                self.raise_if_exception()
 
     def report(self):
         print(f"{self.in_queue.qsize(): >6} => {self.inner.__name__: ^20} => {self.out_queue.qsize(): <6}")
+
+    def __call__(self, values: Iterable[X]) -> Iterator[Y]:
+        if not self.is_alive():
+            raise StateError("Processors have not started")
+
+        n = 0
+        for val in values:
+            self.put(cast(X, val))
+            n += 1
+
+        for _ in range(n):
+            yield self.get(min_timeout=1, retry_on_timeout=True)
+
+    def stop(self, stopped_ok: bool = False, no_raise: bool = False) -> None:
+        if not self.is_alive():
+            if not stopped_ok:
+                raise StateError("Already stopped")
+            if not no_raise:
+                self.raise_if_exception()
+        else:
+            self.raise_exc(Stop)
 
 
 def build_stream(self: SPGraph[X, Y]) -> ThreadedSPGraph[X, Y]:
@@ -368,8 +458,13 @@ class ThreadedBatchLeafNode(ThreadWithExc, ThreadedSPGraph, Generic[X, Y]):
     def put(self, x: X) -> None:
         self.in_queue.put(x)
 
-    def get(self, timeout: float) -> Y:
-        return self.out_queue.get(timeout)
+    def get(self, min_timeout: float, retry_on_timeout: bool) -> Y:
+        while True:
+            try:
+                return self.out_queue.get(timeout=min_timeout)
+            except queue.Empty:
+                if retry_on_timeout:
+                    continue
 
     def report(self):
         print(f"{self.in_queue.qsize(): >6} => {self.inner.__name__: ^20} => {self.out_queue.qsize(): <6}")
