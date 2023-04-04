@@ -7,15 +7,16 @@ import ctypes
 import inspect
 import itertools
 import queue
+import sys
 import threading
-from typing import (Any, Callable, Generic, Iterable, Iterator, List,
-                    Tuple, Type, cast, Sized)
+from typing import (Any, Callable, Generic, Iterable, Iterator, List, Sized,
+                    Tuple, Type, cast)
 
 from typing_extensions import Self
 
-from .spgraph import (LeafNode, ForallNode, SeriesNode, ShouldNotBeReachable, ExistsNode,
-                      SPException, SPGraph, W, X, Y, Z)
-import sys
+from .spgraph import (ExistsNode, ForallNode, LeafNode, SeriesNode,
+                      ShouldNotBeReachable, SPException, SPGraph, W, X, Y, Z)
+
 
 def _async_raise(tid: int, exctype: Type[Exception]) -> None:
     '''Raises an exception in the threads with id tid'''
@@ -86,16 +87,16 @@ class ThreadWithExc(threading.Thread):
         _async_raise( self._get_my_tid(), exctype )
 
     def run(self):
-        setattr(self, 'exception', None)
+        self.exception = None
         try:
             super().run()
         except Exception as exc:
-            self.exception = sys.exc_info()
+            self.exception = exc
         # no dying message
     
     def raise_if_exception(self):
         if self.exception:
-            raise self.exception[0](self.exception[2])
+            raise self.exception
 
 
 class StreamingError(SPException):
@@ -160,7 +161,7 @@ class ThreadedSPGraph:
             _q_ins = [QueueUnit() for _ in spgraph.inner]
             _q_outs = [QueueUnit() for _ in spgraph.inner]
             children = [cls._build(g, i, o) for g, i, o in zip(spgraph.inner, _q_ins, _q_outs)]
-            return ThreadedForallNode(children)
+            return ThreadedForallNode(children, q_in, q_out)
         if isinstance(spgraph, ExistsNode):
             _q_ins = [QueueUnit() for _ in spgraph.inner]
             _q_outs = [QueueUnit() for _ in spgraph.inner]
@@ -180,9 +181,10 @@ class ThreadedSPGraph:
 
 
 class ThreadedInternalNode(ThreadedSPGraph):
-    def __init__(self, inner: ThreadedSPGraph) -> None:
+    def __init__(self, inner: Tuple[ThreadedSPGraph, ...]) -> None:
         self.inner = inner
         self.is_running = False
+        self.exception = None
 
     def start(self) -> None:
         """Start all the child threads. Raises `StateError` if already running"""
@@ -192,31 +194,40 @@ class ThreadedInternalNode(ThreadedSPGraph):
             obj.start()
         self.is_running = True
 
-    def stop(self, stopped_ok: bool = False, no_raise: bool = False) -> None:
+    def get_exceptions(self):
+        excs = []
+        for obj in self.inner:
+            excs += obj.get_exceptions()
+        return excs
+
+    def stop_and_join(self, stopped_ok: bool = False, no_raise: bool = False) -> None:
         """Stop all the child threads. Raises `StateError` if not running"""
         if not self.is_running:
             raise StateError("It is not running")
 
-        excs = []
+        partial_stop = False
         for obj in self.inner:
-            if obj.is_alive():
-                obj.raise_exc(Stop)
+            if isinstance(obj, ThreadWithExc):
+                if obj.is_alive():
+                    obj.raise_exc(Stop)
+                    obj.join()
+                else:
+                    partial_stop = True
                 continue
+            obj.stop_and_join(stopped_ok, no_raise)
 
-            try:
-                self.raise_if_exception()
-            except Exception as exc:
-                excs += [exc]
-            if not stopped_ok:
-                raise StateError("Partially stopped already")
         if not no_raise:
-            if len(excs) == 1:
-                raise excs[0]
-            if len(excs) > 1:
-                raise MultipleErrors(excs)
+            excs = self.get_exceptions()
+            if (exc := make_exception(excs)) is not None:
+                raise exc
+            
+        if partial_stop and not stopped_ok:
+            raise StateError("Some of the threads were dead before called to stop")
         self.is_running = False
 
     def raise_if_exception(self):
+        if self.exception:
+            raise self.exception
         for obj in self.inner:
             obj.raise_if_exception()
 
@@ -249,17 +260,50 @@ class ThreadedSeriesNode(ThreadedInternalNode):
 
     def get(self, min_timeout: float, retry_on_timeout: bool) -> Y:
         """Series specific exception propagation"""
-        try:
-            return self.inner[-1].get(min_timeout=min_timeout, retry_on_timeout=False)
-        except queue.Empty as exc:
-            if not retry_on_timeout:
-                raise exc
-            for i in self.inner:
-                i.raise_if_exception()
+        while True:
+            try:
+                return self.inner[-1].get(min_timeout=min_timeout, retry_on_timeout=False)
+            except queue.Empty as exc:
+                if not retry_on_timeout:
+                    raise exc
+                excs = self.get_exceptions()
+                if (exc := make_exception(excs)) is not None:
+                    self.exception = exc
+                    raise exc
 
 
 class ThreadedForallNode(ThreadedInternalNode):
+    def __init__(self, inner: Tuple[ThreadedSPGraph, ...], q_in, q_out) -> None:
+        super().__init__(inner)
+        self.thread_decompose = ThreadWithExc(target=self._decompose)
+        self.thread_recompose = ThreadWithExc(target=self._recompose)
+        self.q_in = q_in
+        self.q_out = q_out
+        self.ys = []
+
+    def start(self) -> None:
+        """Start all the child threads. Raises `StateError` if already running"""
+        super().start()
+        self.thread_recompose.start()
+        self.thread_decompose.start()
+
+    def _decompose(self) -> None:
+        while True:
+            try:
+                item = self.q_in.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            self._put(item)
+
+    def _recompose(self) -> None:
+        while True:
+            y = self._get(min_timeout=1, retry_on_timeout=True)
+            self.q_out.put(y)
+
     def put(self, x: X) -> None:
+        self.q_in.put(x)
+
+    def _put(self, x: X) -> None:
         if isinstance(x, FlushToken):
             for c in self.inner:
                 c.put(x)
@@ -272,18 +316,49 @@ class ThreadedForallNode(ThreadedInternalNode):
             c.put(_x)
 
     def get(self, min_timeout: float, retry_on_timeout: bool) -> Y:
+        while True:
+            try:
+                return self.q_out.get(timeout=min_timeout)
+            except queue.Empty as exc:
+                if not retry_on_timeout:
+                    raise exc
+                excs = []
+                if self.exception is not None:
+                    excs.append(self.exception)
+                if (exc := self.thread_decompose.exception) is not None:
+                    excs.append(exc)
+                if (exc := self.thread_recompose.exception) is not None:
+                    excs.append(exc)
+                if (exc := make_exception(excs)) is not None:
+                    raise exc
+                continue
+
+    def get_exceptions(self):
+        excs = super().get_exceptions()
+        for th in (self.thread_decompose, self.thread_recompose):
+            if not th.is_alive():
+                if (exc := th.exception) is not None:
+                    if isinstance(exc, Stop):
+                        continue
+                    excs += [exc]
+                else:
+                    excs += [StateError("thread is dead without exception")]
+        return excs
+
+    def _get(self, min_timeout: float, retry_on_timeout: bool) -> Y:
         """Forall specific exception propagation"""
-        ys = []
-        for c in self.inner:
+        for c in self.inner[len(self.ys):]:
             while True:
                 try:
-                    ys.append(c.get(min_timeout=min_timeout, retry_on_timeout=False))
+                    self.ys.append(c.get(min_timeout=min_timeout, retry_on_timeout=False))
                     break
                 except queue.Empty as exc:
                     if not retry_on_timeout:
                         raise exc
-                    c.raise_if_exception()
-        ys = tuple(ys)
+                    if (exc := make_exception(self.get_exceptions())) is not None:
+                        self.exception = exc
+                        raise exc
+        ys, self.ys = tuple(self.ys[:len(self.inner)]), self.ys[len(self.inner):]
 
         # eob token check
         is_token = False
@@ -298,6 +373,31 @@ class ThreadedForallNode(ThreadedInternalNode):
         if is_token:
             return ys[0]
         return ys
+
+    def stop_and_join(self, stopped_ok: bool = False, no_raise: bool = False) -> None:
+        excs = super().get_exceptions()
+        super().stop_and_join(stopped_ok, True)
+
+        for th in (self.thread_decompose, self.thread_recompose):
+            try:
+                th.raise_exc(Stop)
+                if (exc := th.exception) is not None:
+                    excs += [exc]
+                th.join()
+            except RuntimeError:
+                pass
+
+        if not no_raise:
+            if (exc := make_exception(excs)) is not None:
+                raise exc
+
+
+def make_exception(excs):
+    if len(excs) == 0:
+        return
+    if len(excs) == 1:
+        return excs[0]
+    return MultipleErrors(excs)
 
 
 class ThreadedExistsNode(ThreadedInternalNode):
@@ -324,7 +424,9 @@ class ThreadedExistsNode(ThreadedInternalNode):
             except queue.Empty as exc:
                 if not retry_on_timeout:
                     raise exc
-                self.raise_if_exception()
+                excs = self.get_exceptions()
+                if (exc := make_exception(excs)) is not None:
+                    raise exc
 
         if isinstance(ret, FlushToken):
             for _i, c in enumerate(self.inner):
@@ -394,7 +496,7 @@ class ThreadedLeafNode(ThreadWithExc, ThreadedSPGraph, Generic[X, Y]):
         for _ in range(n):
             yield self.get(min_timeout=1, retry_on_timeout=True)
 
-    def stop(self, stopped_ok: bool = False, no_raise: bool = False) -> None:
+    def stop_and_join(self, stopped_ok: bool = False, no_raise: bool = False) -> None:
         if not self.is_alive():
             if not stopped_ok:
                 raise StateError("Already stopped")
@@ -402,6 +504,12 @@ class ThreadedLeafNode(ThreadWithExc, ThreadedSPGraph, Generic[X, Y]):
                 self.raise_if_exception()
         else:
             self.raise_exc(Stop)
+        self.join()
+
+    def get_exceptions(self):
+        if (exc := self.exception) is not None:
+            return [exc]
+        return []
 
 
 def build_stream(self: SPGraph[X, Y]) -> ThreadedSPGraph[X, Y]:
@@ -468,6 +576,11 @@ class ThreadedBatchLeafNode(ThreadWithExc, ThreadedSPGraph, Generic[X, Y]):
 
     def report(self):
         print(f"{self.in_queue.qsize(): >6} => {self.inner.__name__: ^20} => {self.out_queue.qsize(): <6}")
+
+    def get_exceptions(self) -> List[Exception]:
+        if self.exception is None:
+            return []
+        return [self.exception]
 
 
 SPGraph.build_stream = build_stream

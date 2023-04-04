@@ -1,5 +1,5 @@
 # pylint:disable=missing-docstring
-from spgraph.stream import ControlException, StateError
+from spgraph.stream import ControlException, StateError, MultipleErrors
 
 from . import graphml, sexpr, spgraph, symmetry
 from .spgraph import (LeafNode, ForallNode, RepresentationError, SeriesNode,
