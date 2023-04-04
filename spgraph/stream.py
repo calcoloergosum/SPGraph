@@ -338,11 +338,10 @@ class ThreadedForallNode(ThreadedInternalNode):
         for th in (self.thread_decompose, self.thread_recompose):
             if not th.is_alive():
                 if (exc := th.exception) is not None:
-                    if isinstance(exc, Stop):
-                        continue
-                    excs += [exc]
-                else:
-                    excs += [StateError("thread is dead without exception")]
+                    if not isinstance(exc, Stop):
+                        excs += [exc]
+                    continue
+                excs += [StateError("thread is dead without exception")]
         return excs
 
     def _get(self, min_timeout: float, retry_on_timeout: bool) -> Y:
@@ -537,6 +536,7 @@ class ThreadedBatchLeafNode(ThreadWithExc, ThreadedSPGraph, Generic[X, Y]):
         self.in_queue = in_queue
         self.out_queue = out_queue
         self.batchsize = batchsize
+        self.exception = None
         super().__init__(target=self._run)
 
     @Stop.wrap
